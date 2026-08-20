@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pan-Cancer RNA-Seq Classifier</title>
+<meta name="description" content="An interactive, fully client-side dashboard exploring cancer-type classification from RNA-Seq gene expression, comparing logistic regression, random forest, and a PyTorch neural network, with live in-browser predictions.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%AC%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+{{STYLES}}
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">🧬</div>
+      <div class="brand-text">
+        <span class="brand-title">Pan-Cancer RNA-Seq Classifier</span>
+        <span class="brand-sub">Interactive ML / DL dashboard · runs 100% in your browser</span>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Dashboard sections">
+      <button class="tab-btn" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+      <button class="tab-btn" role="tab" data-tab="explore" aria-selected="false">Explore Data</button>
+      <button class="tab-btn" role="tab" data-tab="performance" aria-selected="false">Model Performance</button>
+      <button class="tab-btn" role="tab" data-tab="predict" aria-selected="false">Live Prediction</button>
+      <button class="tab-btn" role="tab" data-tab="methodology" aria-selected="false">Methodology</button>
+    </nav>
+    <button class="icon-btn" id="themeToggle" title="Toggle theme" aria-label="Toggle color theme">🌓</button>
+  </header>
+
+  <main class="main">
+
+    <!-- =================== OVERVIEW =================== -->
+    <section class="panel active" id="panel-overview">
+      <div class="panel-head">
+        <h2>Classifying cancer type from gene expression</h2>
+        <p>Three models, a linear classifier, an ensemble of trees, and a small neural network, trained from scratch on public TCGA RNA-Seq data to distinguish five cancer types from a patient's transcriptome. Explore the data, compare the models, and try live predictions yourself.</p>
+      </div>
+
+      <div class="grid grid-4" id="overviewStats"></div>
+
+      <div class="grid grid-2" style="margin-top:16px;">
+        <div class="card">
+          <div class="card-head"><span class="card-title">Class distribution</span><span class="card-sub">801 tumor samples, 5 cancer types</span></div>
+          <div id="classDistChart"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">About this dataset</span></div>
+          <div class="table-scroll">
+            <table class="table-view">
+              <thead><tr><th>Code</th><th>Cancer type</th><th>N</th><th>Share</th></tr></thead>
+              <tbody id="classTableBody"></tbody>
+            </table>
+          </div>
+          <p style="margin-top:10px;color:var(--text-secondary);font-size:12.5px;">Source: <strong>TCGA Pan-Cancer RNA-Seq</strong>, UCI ML Repository. 20,531-gene expression profiles for 801 patients across five tumor types. The top 60 most discriminative genes (ANOVA F-test) were kept for modeling.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================== EXPLORE =================== -->
+    <section class="panel" id="panel-explore">
+      <div class="panel-head">
+        <h2>Explore the gene-expression landscape</h2>
+        <p>A 2-D projection of every patient's expression profile across the 60 selected genes. Each cancer type is encoded with a unique color <em>and</em> shape, so the plot stays readable for colorblind viewers too.</p>
+      </div>
+      <div class="card">
+        <div class="controls-row">
+          <div class="seg" id="exploreSeg">
+            <button data-mode="pca" aria-pressed="true">PCA</button>
+            <button data-mode="tsne" aria-pressed="false">t-SNE</button>
+          </div>
+          <span class="badge">Filled = test set · Faint = training set</span>
+        </div>
+        <div id="exploreChart"></div>
+        <p id="exploreNote" style="margin-top:10px;color:var(--text-secondary);font-size:12.5px;"></p>
+      </div>
+    </section>
+
+    <!-- =================== PERFORMANCE =================== -->
+    <section class="panel" id="panel-performance">
+      <div class="panel-head">
+        <h2>Model performance</h2>
+        <p>All three models were trained on an identical 80/20 train/test split of the same 60 genes, so results are directly comparable.</p>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head"><span class="card-title">Model comparison</span><span class="card-sub">held-out test set, n=161</span></div>
+        <div class="table-scroll">
+          <table class="table-view">
+            <thead><tr><th>Model</th><th>Accuracy</th><th>F1 (macro)</th><th>Train time</th></tr></thead>
+            <tbody id="modelCompareBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="controls-row">
+          <div class="seg" id="perfSeg">
+            <button data-model="logreg" aria-pressed="true">Logistic Regression</button>
+            <button data-model="rf" aria-pressed="false">Random Forest</button>
+            <button data-model="mlp" aria-pressed="false">Neural Network</button>
+          </div>
+          <span class="badge">Showing: <strong id="perfModelLabel">Logistic Regression</strong></span>
+        </div>
+
+        <div class="grid grid-2">
+          <div>
+            <div class="card-title" style="margin-bottom:8px;">Confusion matrix</div>
+            <div id="confusionChart"></div>
+          </div>
+          <div>
+            <div class="card-title" style="margin-bottom:8px;">ROC curves (one-vs-rest)</div>
+            <div id="rocChart"></div>
+          </div>
+        </div>
+        <div style="margin-top:8px;">
+          <div class="card-title" style="margin-bottom:8px;">Precision / recall / F1 by class</div>
+          <div id="perClassChart"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-2" style="margin-top:16px;">
+        <div class="card">
+          <div class="card-head"><span class="card-title">Neural network training loss</span><span class="card-sub">PyTorch MLP, 150 epochs</span></div>
+          <div id="lossChart"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Neural network training accuracy</span></div>
+          <div id="accChart"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <div class="card-head"><span class="card-title">Top discriminative genes</span><span class="card-sub">Random Forest feature importance</span></div>
+        <div id="importanceChart"></div>
+      </div>
+    </section>
+
+    <!-- =================== PREDICT =================== -->
+    <section class="panel" id="panel-predict">
+      <div class="panel-head">
+        <h2>Live prediction explorer</h2>
+        <p>Load a real held-out patient sample, then perturb its top 16 genes with the sliders below. Every model re-runs <strong>instantly, in your browser</strong>: the trained weights were exported to JSON and the forward pass is re-implemented in plain JavaScript, so no server or Python runtime is needed to use this panel.</p>
+      </div>
+
+      <div class="card">
+        <div class="controls-row">
+          <label for="sampleSelect" style="font-size:12.5px;font-weight:600;color:var(--text-secondary);">Patient sample</label>
+          <select id="sampleSelect"></select>
+          <div class="seg" id="predictModelSeg">
+            <button data-model="logreg" aria-pressed="true">Logistic Regression</button>
+            <button data-model="mlp" aria-pressed="false">Neural Network</button>
+          </div>
+          <button class="btn small" id="resetSampleBtn">Reset sliders</button>
+          <button class="btn small" id="randomSampleBtn">Random sample</button>
+        </div>
+
+        <div class="explorer-grid">
+          <div>
+            <div class="card-title" style="margin-bottom:6px;">Top 16 gene expression levels (log2)</div>
+            <div id="sliderList"></div>
+          </div>
+          <div class="card" style="background:var(--surface-2);">
+            <div class="predict-result">
+              <div class="card-title">Prediction</div>
+              <div class="predict-headline">
+                <span class="predict-class" id="predictClass">-</span>
+                <span class="predict-conf" id="predictConf"></span>
+              </div>
+              <span class="predict-match" id="predictMatch"></span>
+              <div id="probBars" style="margin-top:6px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================== METHODOLOGY =================== -->
+    <section class="panel" id="panel-methodology">
+      <div class="panel-head">
+        <h2>Methodology &amp; tech stack</h2>
+      </div>
+      <div class="card methodology">
+        <h3>Dataset</h3>
+        <p><strong>TCGA Pan-Cancer RNA-Seq</strong> (UCI ML Repository). RNA-Seq gene expression levels for 801 patients across five tumor types (breast, kidney, colon, lung, prostate), 20,531 genes per sample. Publicly available, no PHI.</p>
+        <h3>Feature selection &amp; preprocessing</h3>
+        <p>Raw counts were log2-transformed, then the 60 most discriminative genes were selected with a univariate ANOVA F-test (<code>SelectKBest</code>). Features were standardized (zero mean, unit variance) before modeling. Reducing to 60 genes keeps the models fast to train, interpretable, and small enough to ship their weights to the browser for the live demo.</p>
+        <h3>Models</h3>
+        <ul>
+          <li><strong>Logistic Regression</strong> (scikit-learn): multinomial, L2-regularized linear baseline.</li>
+          <li><strong>Random Forest</strong> (scikit-learn): 300 trees, used for feature-importance ranking.</li>
+          <li><strong>Neural Network</strong> (PyTorch): 60 to 64 to 32 to 5 fully-connected MLP with ReLU activations and dropout, trained with Adam for 150 epochs.</li>
+        </ul>
+        <p>All three train from scratch on a laptop CPU in well under a second (see the model comparison table). No GPU, no cloud compute required.</p>
+        <h3>Client-side inference</h3>
+        <p>For the live prediction panel, the trained Logistic Regression and Neural Network weights are exported to JSON and their forward passes re-implemented in about 30 lines of vanilla JavaScript. That means the entire dashboard (data, charts, and model inference) is <strong>fully static</strong>: no backend, no API calls, no server costs, and it keeps working even if the original training machine is off.</p>
+        <h3>Stack</h3>
+        <div class="stack-row">
+          <span class="badge">Python</span><span class="badge">scikit-learn</span><span class="badge">PyTorch</span><span class="badge">pandas / NumPy</span><span class="badge">vanilla JS</span><span class="badge">hand-rolled SVG charts</span><span class="badge">zero dependencies</span>
+        </div>
+        <h3>Limitations</h3>
+        <p>This is a research and exploratory project, not a diagnostic tool. Gene identifiers in the source dataset are anonymized (<code>gene_0</code> through <code>gene_20530</code>), so results should be read as a methodology exploration rather than a biological finding.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    Research project on cancer-type classification from RNA-Seq gene expression · dataset: TCGA Pan-Cancer RNA-Seq (UCI ML Repository) · runs entirely client-side
+  </footer>
+</div>
+
+<script>
+window.DATA = {{DATA_JSON}};
+</script>
+<script>
+{{CHARTS_JS}}
+</script>
+<script>
+{{APP_JS}}
+</script>
+</body>
+</html>
