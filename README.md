@@ -11,7 +11,7 @@ genes?
 
 Open `dashboard/index.html` in a browser, or view it hosted here:
 
-**https://mahdisabetkish.github.io/pancancer-rnaseq-dashboard/dashboard/**
+**https://mahdisabetkish.github.io/tcga-cancer-type-classifier/dashboard/**
 
 The dashboard has five tabs:
 
