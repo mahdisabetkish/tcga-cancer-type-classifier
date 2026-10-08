@@ -1,3 +1,16 @@
 venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+
+# large/regeneratable data and model artifacts -- regenerate via scripts/,
+# or pull trained weights from the Hugging Face Hub repo (see README)
+data/raw/
+data/processed/
+checkpoints/
+dashboard_app/data/demo_samples.npz
+
+# keep: results/*.json (small, used by the dashboard bundle),
+# dashboard_app/data/bundle.json and classes.json (small, static fallback)
+build/
+*.egg-info/

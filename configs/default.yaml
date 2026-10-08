@@ -1,0 +1,41 @@
+data:
+  processed_dir: data/processed
+
+model:
+  dim: 64
+  n_heads: 4
+  n_inducing: 96
+  n_isab_layers: 3
+  dropout: 0.1
+
+ssl:
+  projector_hidden: 256
+  projector_out: 256
+  epochs: 60
+  batch_size: 32
+  lr: 3.0e-4
+  weight_decay: 1.0e-5
+  mask_prob: 0.15
+  noise_std: 0.10
+  scale_jitter: 0.05
+  lambda_inv: 25.0
+  mu_var: 25.0
+  nu_cov: 1.0
+  checkpoint: checkpoints/ssl_backbone.pt
+  log_every: 20
+
+finetune:
+  epochs: 80
+  batch_size: 48
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  kl_weight: 1.0e-4
+  mc_samples_eval: 30
+  freeze_backbone: false
+  checkpoint: checkpoints/finetuned.pt
+
+ablation:
+  no_ssl: checkpoints/ablation_no_ssl.pt
+  no_equivariance: checkpoints/ablation_no_equivariance.pt
+
+seed: 42
