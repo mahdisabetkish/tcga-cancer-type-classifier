@@ -59,12 +59,34 @@ used strictly as categorical ids for a tabular multi-class benchmark.
 - `demo_samples.npz`, `classes.json` -- small bundle used by the live
   dashboard (not the full training dataset).
 
-## Results
+## Results, reported honestly
 
-See the linked source repository and its live dashboard (Hugging Face
-Space) for the full evaluation, including comparisons against standard
-baselines and an ablation study (no-SSL-pretraining, no-equivariant-encoder
-variants) with calibration metrics.
+The point of this benchmark is to check whether each piece of the
+architecture earns its place, not to assume it does. On this dataset
+and split, it mostly doesn't, on raw test accuracy:
+
+| Model | Test accuracy | F1 (macro) | ECE |
+|---|---|---|---|
+| Logistic regression (baseline) | {logreg_acc} | {logreg_f1} | -- |
+| Plain MLP (baseline) | {mlp_acc} | {mlp_f1} | -- |
+| Random forest (baseline) | {rf_acc} | {rf_f1} | -- |
+| Ablation: no equivariant encoder (MLP + Bayesian head) | {no_equiv_acc} | {no_equiv_f1} | {no_equiv_ece} |
+| Ablation: no SSL pretraining | {no_ssl_acc} | {no_ssl_f1} | {no_ssl_ece} |
+| **Full model** (SSL + equivariant encoder + Bayesian head) | {full_acc} | {full_f1} | {full_ece} |
+
+The simple baselines win here. This dataset is close to linearly
+separable in log-expression space, so the architectural machinery built
+for harder, less separable tabular problems doesn't pay for itself on
+raw accuracy on this one -- and that's a real finding, not a caveat to
+bury. Full history, per-class breakdowns, and the code for every row
+above are in the source repository.
+
+## Live demo
+
+- In-browser demo (ONNX Runtime Web, no server to keep running):
+  https://mahdisabetkish.github.io/tcga-cancer-type-classifier/
+- Full interactive dashboard (Docker image, local run):
+  `docker run -p 7860:7860 mahdisabetkish/tcga-pancancer-set-transformer`
 
 ## Source
 
@@ -84,11 +106,37 @@ def main():
 
     with open(ROOT / "dashboard_app" / "data" / "bundle.json") as f:
         bundle = json.load(f)
+    results = bundle.get("results", {})
+
+    def pct(section, key, metric="accuracy"):
+        v = results.get(section, {}).get(key, {}).get(metric)
+        return f"{v*100:.1f}%" if v is not None else "n/a"
+
+    def finetune_pct(tag, metric):
+        v = results.get(tag, {}).get(metric)
+        if metric == "ece":
+            return f"{v:.3f}" if v is not None else "n/a"
+        return f"{v*100:.1f}%" if v is not None else "n/a"
 
     card = MODEL_CARD_TEMPLATE.format(
         n_samples=bundle.get("n_test_samples", "?"),
         n_features=bundle.get("n_features", "?"),
         n_classes=len(bundle.get("classes", [])),
+        logreg_acc=pct("baselines", "logreg", "accuracy"),
+        logreg_f1=pct("baselines", "logreg", "f1_macro"),
+        mlp_acc=pct("baselines", "plain_mlp", "accuracy"),
+        mlp_f1=pct("baselines", "plain_mlp", "f1_macro"),
+        rf_acc=pct("baselines", "random_forest", "accuracy"),
+        rf_f1=pct("baselines", "random_forest", "f1_macro"),
+        no_equiv_acc=finetune_pct("finetune_no_equivariance", "test_accuracy"),
+        no_equiv_f1=finetune_pct("finetune_no_equivariance", "test_f1_macro"),
+        no_equiv_ece=finetune_pct("finetune_no_equivariance", "ece"),
+        no_ssl_acc=finetune_pct("finetune_no_ssl", "test_accuracy"),
+        no_ssl_f1=finetune_pct("finetune_no_ssl", "test_f1_macro"),
+        no_ssl_ece=finetune_pct("finetune_no_ssl", "ece"),
+        full_acc=finetune_pct("finetune_full", "test_accuracy"),
+        full_f1=finetune_pct("finetune_full", "test_f1_macro"),
+        full_ece=finetune_pct("finetune_full", "ece"),
     )
     card_path = ROOT / "README_model_card.md"
     card_path.write_text(card)

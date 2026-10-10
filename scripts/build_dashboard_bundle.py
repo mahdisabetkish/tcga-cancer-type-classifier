@@ -13,6 +13,7 @@ from omegaconf import OmegaConf
 from sklearn.decomposition import PCA
 
 from tcga_bench.data.dataset import TCGAExpressionDataset
+from tcga_bench.eval.interpretability import attention_attribution
 from tcga_bench.models.backbone import TabularSetBackbone
 from tcga_bench.models.bayesian_head import BayesianLinear
 
@@ -37,14 +38,45 @@ def main():
     backbone.eval()
     head.eval()
 
+    # The ISAB attention tensors scale with (batch * n_inducing * n_features),
+    # which is tens of GB for the full test set in one shot on this feature
+    # count -- batch the forward passes to keep peak memory bounded.
+    batch_size = 16
+    reps_list, probs_list = [], []
     with torch.no_grad():
-        x = torch.from_numpy(test_ds.X).to(device)
-        reps = backbone(x).cpu().numpy()
-        probs = head.predict_distribution(torch.from_numpy(test_ds.X).to(device), n_samples=cfg.finetune.mc_samples_eval)
-        probs = probs.mean(dim=0).cpu().numpy()
+        for start in range(0, len(test_ds.y), batch_size):
+            xb = torch.from_numpy(test_ds.X[start:start + batch_size]).to(device)
+            reps_b = backbone(xb)
+            reps_list.append(reps_b.cpu().numpy())
+            probs_b = head.predict_distribution(reps_b, n_samples=cfg.finetune.mc_samples_eval)
+            probs_list.append(probs_b.mean(dim=0).cpu().numpy())
+    reps = np.concatenate(reps_list)
+    probs = np.concatenate(probs_list)
 
     pca = PCA(n_components=2, random_state=cfg.seed)
     coords = pca.fit_transform(reps)
+
+    print("Computing attention-based global feature attribution...")
+    n_attn_samples = min(300, len(test_ds.y))
+    attn_idx = np.random.RandomState(cfg.seed).choice(len(test_ds.y), n_attn_samples, replace=False)
+    attn_list = []
+    with torch.no_grad():
+        for start in range(0, len(attn_idx), batch_size):
+            idx_b = attn_idx[start:start + batch_size]
+            attn_list.append(attention_attribution(backbone, torch.from_numpy(test_ds.X[idx_b]).to(device)).cpu())
+    attn = torch.cat(attn_list)
+    mean_attn = attn.mean(dim=0).numpy()
+    top_k = 25
+    top_idx = np.argsort(-mean_attn)[:top_k]
+    feature_attribution = {
+        "note": "Mean PMA-pooling attention weight per feature, averaged over "
+                f"{n_attn_samples} test samples. Feature identity shown as an "
+                "anonymized index only -- no biological interpretation is made.",
+        "top_features": [
+            {"feature_idx": int(i), "mean_attention": round(float(mean_attn[i]), 6)}
+            for i in top_idx
+        ],
+    }
 
     results = {}
     for name in ["baselines", "finetune_full", "finetune_no_ssl", "finetune_no_equivariance"]:
@@ -70,6 +102,7 @@ def main():
         "n_features": test_ds.n_features,
         "n_test_samples": len(test_ds.y),
         "pca_var_explained": [round(float(v), 4) for v in pca.explained_variance_ratio_],
+        "feature_attribution": feature_attribution,
         "results": results,
         "samples": sample_bank,
     }

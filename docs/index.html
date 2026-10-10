@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TCGA Pan-Cancer Representation Learning -- Live Demo</title>
+<meta name="description" content="In-browser demo of a self-supervised, set-equivariant classifier on TCGA pan-cancer RNA-seq data. A methods study, not a diagnostic tool." />
+<style>
+  :root {
+    --bg: #f8fafc; --text: #1e293b; --muted: #64748b; --card: #ffffff;
+    --border: rgba(15, 23, 42, 0.08); --accent: #0d9488; --accent-dark: #0f766e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: Inter, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 16px 48px; }
+  .hero {
+    background: linear-gradient(135deg, #0f172a 0%, #134e4a 100%);
+    padding: 36px 20px; margin-bottom: 24px;
+  }
+  .hero-inner { max-width: 900px; margin: 0 auto; }
+  .hero h1 { font-size: 1.5rem; font-weight: 700; color: #f1f5f9; margin: 0 0 8px; line-height: 1.35; }
+  .hero p { font-size: 0.92rem; color: #cbd5e1; margin: 0; max-width: 680px; }
+  .badge {
+    display: inline-block; margin-top: 14px; font-size: 0.78rem; color: #99f6e4;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 6px; padding: 4px 10px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 22px; margin-bottom: 18px;
+  }
+  .card h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  select, button {
+    font: inherit; font-size: 0.92rem; padding: 9px 14px; border-radius: 8px;
+    border: 1px solid var(--border); background: #fff; color: var(--text);
+  }
+  button {
+    background: var(--accent); color: #fff; border: none; cursor: pointer;
+    font-weight: 600;
+  }
+  button:hover { background: var(--accent-dark); }
+  button:disabled { opacity: 0.55; cursor: default; }
+  #status { font-size: 0.85rem; color: var(--muted); margin-top: 10px; min-height: 1.2em; }
+  .result-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .pred-label { font-size: 1.15rem; font-weight: 700; }
+  .pred-label.correct { color: var(--accent-dark); }
+  .pred-label.wrong { color: #b91c1c; }
+  .true-label { font-size: 0.85rem; color: var(--muted); }
+  .bars { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+  .bar-row { display: grid; grid-template-columns: 170px 1fr 56px; gap: 10px; align-items: center; font-size: 0.82rem; }
+  .bar-track { background: #eef2f6; border-radius: 5px; height: 12px; overflow: hidden; }
+  .bar-fill { background: var(--accent); height: 100%; border-radius: 5px; }
+  .bar-pct { color: var(--muted); text-align: right; }
+  footer { font-size: 0.78rem; color: var(--muted); text-align: center; margin-top: 8px; }
+  footer a { color: var(--accent-dark); text-decoration: none; }
+  a { color: var(--accent-dark); }
+  code { background: #eef2f6; padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="hero-inner">
+      <h1>Self-Supervised, Equivariant Classification on TCGA Pan-Cancer RNA-seq -- Live, In-Browser</h1>
+      <p>
+        This page runs the trained model directly in your browser via ONNX Runtime Web --
+        no server, nothing to keep running. It is a math and machine learning methods
+        study on a large tabular classification problem. No biological, diagnostic, or
+        clinical claim is made anywhere on this page or in this project.
+      </p>
+      <span class="badge">runs entirely client-side -- nothing sent to any server</span>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="card">
+      <h2>Pick a held-out test sample</h2>
+      <div class="row">
+        <select id="sampleSelect"></select>
+        <button id="runBtn">Run prediction</button>
+      </div>
+      <div id="status">Loading model...</div>
+    </div>
+
+    <div class="card" id="resultCard" style="display:none">
+      <div class="result-head">
+        <span class="pred-label" id="predLabel"></span>
+        <span class="true-label" id="trueLabel"></span>
+      </div>
+      <div class="bars" id="bars"></div>
+    </div>
+
+    <div class="card">
+      <h2>What this is</h2>
+      <p style="font-size:0.88rem; color:var(--muted); line-height:1.6;">
+        The model is a set-equivariant encoder (ISAB / PMA, Lee et al. 2019) pretrained with
+        VICReg self-supervision, finetuned with a Bayes-by-Backprop linear head. This page
+        exports that same model to ONNX and runs it with
+        <a href="https://onnxruntime.ai/" target="_blank" rel="noopener">ONNX Runtime Web</a>
+        using mean posterior weights (a deterministic pass) for a model that works with no backend.
+        The full Bayesian predictive distribution, calibration analysis, and ablation study
+        against simpler baselines are in the live dashboard and the
+        <a href="https://github.com/mahdisabetkish/tcga-cancer-type-classifier" target="_blank" rel="noopener">source repository</a>.
+      </p>
+      <p style="font-size:0.88rem; color:var(--muted); line-height:1.6; margin-top:10px;">
+        Class labels are the standard TCGA pan-cancer project categories, used here strictly
+        as category ids for a 32-class classification problem -- not as a diagnostic or
+        clinical statement about any sample.
+      </p>
+    </div>
+
+    <footer>
+      <a href="https://github.com/mahdisabetkish/tcga-cancer-type-classifier" target="_blank" rel="noopener">Source code</a>
+      &middot;
+      <a href="https://huggingface.co/mahdisabetkish/tcga-pancancer-set-transformer" target="_blank" rel="noopener">Model weights</a>
+      &middot;
+      <a href="https://hub.docker.com/r/mahdisabetkish/tcga-pancancer-set-transformer" target="_blank" rel="noopener">Docker image (full live dashboard)</a>
+    </footer>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+<script>
+const CLASS_NAMES_URL = "demo_meta.json";
+const FEATURES_URL = "demo_features.bin";
+const MODEL_URL = "model.onnx";
+
+let session, meta, featureMatrix;
+
+function setStatus(msg) { document.getElementById("status").textContent = msg; }
+
+async function loadAll() {
+  ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/";
+  setStatus("Fetching demo data...");
+  const [metaResp, featResp] = await Promise.all([fetch(CLASS_NAMES_URL), fetch(FEATURES_URL)]);
+  meta = await metaResp.json();
+  const buf = await featResp.arrayBuffer();
+  featureMatrix = new Float32Array(buf);
+
+  const select = document.getElementById("sampleSelect");
+  meta.samples.forEach((s, i) => {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = `Sample ${i + 1} -- true class: ${meta.classes[s.true_label]}`;
+    select.appendChild(opt);
+  });
+
+  setStatus("Loading ONNX model (~14 MB, one-time)...");
+  session = await ort.InferenceSession.create(MODEL_URL, { executionProviders: ["wasm"] });
+  setStatus("Ready. Pick a sample and click \"Run prediction\".");
+  document.getElementById("runBtn").disabled = false;
+}
+
+function topK(probs, k) {
+  return Array.from(probs.map((p, i) => [p, i]))
+    .sort((a, b) => b[0] - a[0])
+    .slice(0, k);
+}
+
+async function runPrediction() {
+  const select = document.getElementById("sampleSelect");
+  const i = parseInt(select.value, 10);
+  const nFeat = meta.n_features;
+  const row = featureMatrix.slice(i * nFeat, (i + 1) * nFeat);
+
+  setStatus("Running inference...");
+  const input = new ort.Tensor("float32", row, [1, nFeat]);
+  const t0 = performance.now();
+  const output = await session.run({ features: input });
+  const dt = (performance.now() - t0).toFixed(0);
+  const probs = Array.from(output.probs.data);
+
+  const trueLabel = meta.samples[i].true_label;
+  const ranked = topK(probs, 5);
+  const predIdx = ranked[0][1];
+  const correct = predIdx === trueLabel;
+
+  document.getElementById("resultCard").style.display = "block";
+  const predEl = document.getElementById("predLabel");
+  predEl.textContent = `Predicted: ${meta.classes[predIdx]}`;
+  predEl.className = "pred-label " + (correct ? "correct" : "wrong");
+  document.getElementById("trueLabel").textContent =
+    `True: ${meta.classes[trueLabel]} (${correct ? "match" : "no match"})`;
+
+  const bars = document.getElementById("bars");
+  bars.innerHTML = "";
+  ranked.forEach(([p, idx]) => {
+    const pct = (p * 100).toFixed(1);
+    const row = document.createElement("div");
+    row.className = "bar-row";
+    row.innerHTML = `
+      <span>${meta.classes[idx]}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
+      <span class="bar-pct">${pct}%</span>`;
+    bars.appendChild(row);
+  });
+  setStatus(`Done in ${dt} ms, in your browser.`);
+}
+
+document.getElementById("runBtn").addEventListener("click", () => {
+  runPrediction().catch(err => setStatus("Error: " + err.message));
+});
+document.getElementById("runBtn").disabled = true;
+loadAll().catch(err => setStatus("Error loading model: " + err.message));
+</script>
+</body>
+</html>

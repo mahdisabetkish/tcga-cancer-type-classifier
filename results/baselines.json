@@ -1,0 +1,23 @@
+{
+  "logreg": {
+    "name": "Logistic Regression",
+    "accuracy": 0.9608127721335269,
+    "f1_macro": 0.9436870351085034,
+    "log_loss": 0.17007512168595917,
+    "train_time_sec": 30.46
+  },
+  "random_forest": {
+    "name": "Random Forest",
+    "accuracy": 0.941944847605225,
+    "f1_macro": 0.8994777567796215,
+    "log_loss": 0.4007675319436211,
+    "train_time_sec": 8.49
+  },
+  "plain_mlp": {
+    "name": "Plain MLP (baseline, no SSL/equivariance/Bayesian head)",
+    "accuracy": 0.95355587808418,
+    "f1_macro": 0.9345171246668174,
+    "log_loss": 0.2708726796533767,
+    "train_time_sec": 3.6
+  }
+}

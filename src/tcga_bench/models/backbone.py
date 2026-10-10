@@ -26,9 +26,9 @@ class TabularSetBackbone(nn.Module):
         self.encoder = SetEncoder(dim, n_heads, n_inducing, n_isab_layers, dropout)
         self.out_dim = dim
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, return_attn: bool = False):
         tokens = self.tokenizer(x)
-        return self.encoder(tokens)
+        return self.encoder(tokens, return_attn=return_attn)
 
 
 class PlainMLPBackbone(nn.Module):

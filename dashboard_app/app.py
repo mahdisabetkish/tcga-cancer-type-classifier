@@ -28,6 +28,7 @@ import plotly.graph_objects as go
 import torch
 from omegaconf import OmegaConf
 
+from tcga_bench.eval.interpretability import attention_attribution, integrated_gradients
 from tcga_bench.models.backbone import TabularSetBackbone
 from tcga_bench.models.bayesian_head import BayesianLinear
 
@@ -80,6 +81,18 @@ CFG, DEMO, CLASSES, BUNDLE, BACKBONE, HEAD = load_everything()
 SLIDER_IDX = DEMO["slider_feature_idx"].tolist()
 N_SAMPLES = DEMO["X_std"].shape[0]
 
+PLOTLY_LAYOUT = dict(
+    template="plotly_white",
+    font=dict(family="Inter, -apple-system, Segoe UI, sans-serif", size=13, color="#1e293b"),
+    colorway=["#0d9488", "#6366f1", "#f59e0b", "#ef4444", "#0ea5e9", "#84cc16", "#a855f7", "#ec4899"],
+    margin=dict(l=10, r=10, t=44, b=10),
+)
+
+
+def style(fig: go.Figure, **overrides) -> go.Figure:
+    fig.update_layout(**{**PLOTLY_LAYOUT, **overrides})
+    return fig
+
 
 @torch.no_grad()
 def predict(raw_vector: np.ndarray) -> dict:
@@ -104,16 +117,46 @@ def run_live_prediction(sample_idx: int, *slider_values):
         x=[probs[i] for i in order][::-1],
         y=[CLASSES[i] for i in order][::-1],
         orientation="h",
+        marker_color="#0d9488",
     ))
-    fig.update_layout(
-        title=f"Top-5 predicted classes (true: {true_label})",
-        xaxis_title="Predicted probability (MC mean, 30 samples)",
-        margin=dict(l=10, r=10, t=40, b=10), height=320,
-    )
+    style(fig,
+          title=f"Top-5 predicted classes (true: {true_label})",
+          xaxis_title="Predicted probability (MC mean, 30 samples)",
+          height=320)
     pred_label = CLASSES[int(np.argmax(probs))]
     verdict = "correct" if pred_label == true_label else "incorrect"
     summary = f"Predicted: **{pred_label}** ({verdict}) | True: **{true_label}** | predictive entropy: {entropy:.3f} nats"
     return fig, summary
+
+
+def explain_prediction(sample_idx: int, *slider_values):
+    raw = DEMO["X_raw"][sample_idx].copy()
+    for pos, val in zip(SLIDER_IDX, slider_values):
+        raw[pos] = val
+    std_vec = (raw - DEMO["scaler_mean"]) / DEMO["scaler_std"]
+    x = torch.from_numpy(std_vec.astype(np.float32)).unsqueeze(0)
+
+    with torch.no_grad():
+        pred_class = int(torch.argmax(HEAD(BACKBONE(x), sample=False), dim=1).item())
+
+    # fewer steps than the module default (50): a live "explain" button on
+    # CPU trades some Integrated-Gradients precision for a few seconds'
+    # wait instead of ~15s; see benchmark note in interpretability.py
+    attributions = integrated_gradients(BACKBONE, HEAD, x, target_class=pred_class, n_steps=20).numpy()
+
+    order = np.argsort(-np.abs(attributions))[:12]
+    colors = ["#0d9488" if v >= 0 else "#ef4444" for v in [attributions[i] for i in order][::-1]]
+    fig = go.Figure(go.Bar(
+        x=[attributions[i] for i in order][::-1],
+        y=[f"feature[{i}]" for i in order][::-1],
+        orientation="h",
+        marker_color=colors,
+    ))
+    style(fig,
+          title=f"Integrated-Gradients attribution for predicted class: {CLASSES[pred_class]}",
+          xaxis_title="attribution (+ pushes toward this class, - pushes away)",
+          height=380)
+    return fig
 
 
 def slider_defaults(sample_idx: int):
@@ -123,7 +166,7 @@ def slider_defaults(sample_idx: int):
 
 def on_sample_change(sample_idx):
     defaults = slider_defaults(sample_idx)
-    return defaults + [None, ""]
+    return defaults + [None, "", None]
 
 
 def build_performance_tab():
@@ -155,19 +198,20 @@ def build_performance_tab():
         )
         if "finetune_full" in results:
             cm = np.array(results["finetune_full"]["confusion_matrix"])
-            fig = go.Figure(go.Heatmap(z=cm, x=CLASSES, y=CLASSES, colorscale="Blues"))
-            fig.update_layout(title="Confusion matrix -- full model (test set)", height=600,
-                               margin=dict(l=10, r=10, t=40, b=10))
+            fig = go.Figure(go.Heatmap(z=cm, x=CLASSES, y=CLASSES, colorscale="Teal"))
+            style(fig, title="Confusion matrix -- full model (test set)", height=600)
             gr.Plot(fig)
 
             bins = results["finetune_full"]["calibration_bins"]
             xs = [b["avg_confidence"] for b in bins if b["avg_confidence"] is not None]
             ys = [b["avg_accuracy"] for b in bins if b["avg_accuracy"] is not None]
             cal_fig = go.Figure()
-            cal_fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="perfect calibration", line=dict(dash="dash")))
-            cal_fig.add_trace(go.Scatter(x=xs, y=ys, mode="markers+lines", name="full model"))
-            cal_fig.update_layout(title=f"Reliability diagram (ECE={results['finetune_full']['ece']:.4f})",
-                                   xaxis_title="confidence", yaxis_title="accuracy", height=400)
+            cal_fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="perfect calibration",
+                                          line=dict(dash="dash", color="#94a3b8")))
+            cal_fig.add_trace(go.Scatter(x=xs, y=ys, mode="markers+lines", name="full model",
+                                          line=dict(color="#0d9488"), marker=dict(color="#0d9488")))
+            style(cal_fig, title=f"Reliability diagram (ECE={results['finetune_full']['ece']:.4f})",
+                  xaxis_title="confidence", yaxis_title="accuracy", height=400)
             gr.Plot(cal_fig)
 
 
@@ -180,12 +224,78 @@ def build_embedding_tab():
     ys = [s["pca_y"] for s in samples]
     labels = [CLASSES[s["true_label"]] for s in samples]
     fig = go.Figure(go.Scatter(x=xs, y=ys, mode="markers", text=labels,
-                                marker=dict(size=5, color=[s["true_label"] for s in samples], colorscale="Rainbow"),
+                                marker=dict(size=5, color=[s["true_label"] for s in samples], colorscale="Turbo"),
                                 hovertemplate="%{text}<extra></extra>"))
     var = BUNDLE.get("pca_var_explained", [0, 0])
-    fig.update_layout(title=f"PCA of learned representation (test set) -- {sum(var)*100:.1f}% variance explained",
-                       height=600, margin=dict(l=10, r=10, t=40, b=10))
+    style(fig, title=f"PCA of learned representation (test set) -- {sum(var)*100:.1f}% variance explained",
+          height=600)
     gr.Plot(fig)
+
+
+def build_interpretability_tab():
+    attribution = BUNDLE.get("feature_attribution")
+    if not attribution:
+        gr.Markdown("Global attention attribution not available yet.")
+        return
+    gr.Markdown(f"_{attribution['note']}_")
+    top = attribution["top_features"]
+    fig = go.Figure(go.Bar(
+        x=[t["mean_attention"] for t in top][::-1],
+        y=[f"feature[{t['feature_idx']}]" for t in top][::-1],
+        orientation="h",
+        marker_color="#6366f1",
+    ))
+    style(fig,
+          title="Global attribution: mean PMA-pooling attention weight (top 25, averaged over 300 test samples)",
+          xaxis_title="mean attention weight", height=600)
+    gr.Plot(fig)
+
+
+CUSTOM_CSS = """
+.hero {
+    background: linear-gradient(135deg, #0f172a 0%, #134e4a 100%);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 18px;
+}
+.hero-title { font-size: 1.5rem; font-weight: 700; line-height: 1.35; margin-bottom: 6px; color: #f1f5f9; }
+.hero-sub { font-size: 0.92rem; color: #cbd5e1; margin-bottom: 18px; }
+.stat-grid { display: flex; flex-wrap: wrap; gap: 14px; }
+.stat-card {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 10px;
+    padding: 10px 18px;
+    min-width: 128px;
+    text-align: center;
+}
+.stat-num { font-size: 1.35rem; font-weight: 700; color: #2dd4bf; }
+.stat-label { font-size: 0.72rem; color: #cbd5e1; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+"""
+
+
+def build_hero_html() -> str:
+    results = BUNDLE.get("results", {})
+    full = results.get("finetune_full")
+    acc = f"{full['test_accuracy']*100:.1f}%" if full else "pending"
+    f1 = f"{full['test_f1_macro']*100:.1f}%" if full else "pending"
+    ece = f"{full['ece']:.3f}" if full else "pending"
+    n_test = BUNDLE.get("n_test_samples", N_SAMPLES)
+    n_feat = BUNDLE.get("n_features", DEMO["X_std"].shape[1])
+    stats = [
+        (n_test, "test samples"), (n_feat, "features"), (len(CLASSES), "classes"),
+        (acc, "test accuracy, full model"), (f1, "F1 macro"), (ece, "calibration error (ECE)"),
+    ]
+    cards = "".join(f'<div class="stat-card"><div class="stat-num">{v}</div>'
+                     f'<div class="stat-label">{label}</div></div>' for v, label in stats)
+    return (
+        '<div class="hero">'
+        '<div class="hero-title">Self-Supervised, Equivariant, Uncertainty-Aware '
+        'Representation Learning on Large-Scale Tabular Data</div>'
+        '<div class="hero-sub">A math and machine learning methods study. '
+        'No biological or clinical claim is made anywhere in this project.</div>'
+        f'<div class="stat-grid">{cards}</div></div>'
+    )
 
 
 METHODOLOGY_MD = """
@@ -226,13 +336,10 @@ every design choice is checked against the data rather than asserted.
 """
 
 
-with gr.Blocks(title="TCGA Pan-Cancer Representation Learning Benchmark") as demo:
-    gr.Markdown("# Self-Supervised, Equivariant, Uncertainty-Aware Representation Learning on Large-Scale Tabular Data")
-    gr.Markdown(
-        f"{BUNDLE.get('n_test_samples', N_SAMPLES)} held-out test samples · "
-        f"{BUNDLE.get('n_features', DEMO['X_std'].shape[1])} features · {len(CLASSES)} classes. "
-        "Purely a math/ML/software-engineering methods demo -- no biological or clinical claims."
-    )
+THEME = gr.themes.Soft(primary_hue="teal", secondary_hue="indigo", neutral_hue="slate")
+
+with gr.Blocks(title="TCGA Pan-Cancer Representation Learning Benchmark", theme=THEME, css=CUSTOM_CSS) as demo:
+    gr.HTML(build_hero_html())
 
     with gr.Tab("Live Prediction"):
         gr.Markdown("Pick a held-out sample, optionally perturb its top-variance features, and run a real "
@@ -249,14 +356,23 @@ with gr.Blocks(title="TCGA Pan-Cancer Representation Learning Benchmark") as dem
         plot_out = gr.Plot()
         summary_out = gr.Markdown()
 
-        sample_dd.change(on_sample_change, inputs=sample_dd, outputs=sliders + [plot_out, summary_out])
+        gr.Markdown("**Explain this prediction** (Integrated Gradients, ~5-10s on CPU): "
+                    "which features pushed the model toward / away from its predicted class.")
+        explain_btn = gr.Button("Explain prediction")
+        explain_plot = gr.Plot()
+
+        sample_dd.change(on_sample_change, inputs=sample_dd, outputs=sliders + [plot_out, summary_out, explain_plot])
         predict_btn.click(run_live_prediction, inputs=[sample_dd] + sliders, outputs=[plot_out, summary_out])
+        explain_btn.click(explain_prediction, inputs=[sample_dd] + sliders, outputs=[explain_plot])
 
     with gr.Tab("Model Performance"):
         build_performance_tab()
 
     with gr.Tab("Embedding Explorer"):
         build_embedding_tab()
+
+    with gr.Tab("Interpretability"):
+        build_interpretability_tab()
 
     with gr.Tab("Methodology"):
         gr.Markdown(METHODOLOGY_MD)

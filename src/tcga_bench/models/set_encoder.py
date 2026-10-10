@@ -35,10 +35,14 @@ class MAB(nn.Module):
         )
         self.ln2 = nn.LayerNorm(dim)
 
-    def forward(self, q: torch.Tensor, kv: torch.Tensor) -> torch.Tensor:
-        attn_out, _ = self.attn(q, kv, kv, need_weights=False)
+    def forward(self, q: torch.Tensor, kv: torch.Tensor, need_weights: bool = False):
+        attn_out, attn_w = self.attn(
+            q, kv, kv, need_weights=need_weights, average_attn_weights=True
+        )
         h = self.ln1(q + attn_out)
         h = self.ln2(h + self.ff(h))
+        if need_weights:
+            return h, attn_w  # attn_w: (batch, n_queries, n_keys)
         return h
 
 
@@ -65,9 +69,12 @@ class PMA(nn.Module):
         self.seeds = nn.Parameter(torch.randn(n_seeds, dim) * (dim**-0.5))
         self.mab = MAB(dim, n_heads, dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, need_weights: bool = False):
         b = x.size(0)
         seeds = self.seeds.unsqueeze(0).expand(b, -1, -1)
+        if need_weights:
+            out, attn_w = self.mab(seeds, x, need_weights=True)
+            return out, attn_w  # out: (batch, n_seeds, dim), attn_w: (batch, n_seeds, n_tokens)
         return self.mab(seeds, x)  # (batch, n_seeds, dim)
 
 
@@ -86,9 +93,12 @@ class SetEncoder(nn.Module):
         )
         self.pma = PMA(dim, n_heads, n_seeds=1, dropout=dropout)
 
-    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, return_attn: bool = False):
         h = tokens
         for isab in self.isabs:
             h = isab(h)
+        if return_attn:
+            pooled, attn_w = self.pma(h, need_weights=True)
+            return pooled.squeeze(1), attn_w.squeeze(1)  # attn_w: (batch, n_tokens)
         pooled = self.pma(h).squeeze(1)  # (batch, dim)
         return pooled

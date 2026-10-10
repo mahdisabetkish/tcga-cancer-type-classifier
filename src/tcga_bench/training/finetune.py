@@ -88,6 +88,7 @@ def main():
         params += list(backbone.parameters())
     opt = torch.optim.AdamW(params, lr=cfg.finetune.lr, weight_decay=cfg.finetune.weight_decay)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg.finetune.epochs)
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
 
     ckpt_path = Path(f"checkpoints/finetuned_{args.tag}.pt")
     ckpt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,12 +105,14 @@ def main():
         for x, y in train_loader:
             x, y = x.to(device), y.to(device)
             opt.zero_grad(set_to_none=True)
-            rep = backbone(x)
-            logits = head(rep, sample=True)
-            kl = head.kl_divergence() / (n_train_batches * x.size(0))
-            loss = ce_loss(logits, y) + cfg.finetune.kl_weight * kl
-            loss.backward()
-            opt.step()
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=(device.type == "cuda")):
+                rep = backbone(x)
+                logits = head(rep, sample=True)
+                kl = head.kl_divergence() / (n_train_batches * x.size(0))
+                loss = ce_loss(logits, y) + cfg.finetune.kl_weight * kl
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
             running_loss += loss.item()
         sched.step()
 
@@ -119,7 +122,8 @@ def main():
             correct, total = 0, 0
             for x, y in val_loader:
                 x, y = x.to(device), y.to(device)
-                logits = head(backbone(x), sample=False)
+                with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=(device.type == "cuda")):
+                    logits = head(backbone(x), sample=False)
                 correct += (logits.argmax(1) == y).sum().item()
                 total += y.size(0)
             val_acc = correct / total
@@ -143,8 +147,9 @@ def main():
     with torch.no_grad():
         for x, y in test_loader:
             x = x.to(device)
-            probs = head.predict_distribution(backbone(x), n_samples=cfg.finetune.mc_samples_eval)
-            all_probs.append(probs.mean(dim=0).cpu().numpy())
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=(device.type == "cuda")):
+                probs = head.predict_distribution(backbone(x), n_samples=cfg.finetune.mc_samples_eval)
+            all_probs.append(probs.mean(dim=0).float().cpu().numpy())
             all_labels.append(y.numpy())
     probs = np.concatenate(all_probs)
     labels = np.concatenate(all_labels)
