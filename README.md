@@ -223,9 +223,7 @@ an easy problem that flatters the fancier model.
 
 ## Honest limits
 
-This project is a method study. It is not a biology result and not a
-medical result. The classes are not balanced, some have very few
-samples and some have many. This is handled with class weights in the
-loss, and it is shown openly in the per class numbers in the dashboard,
-not hidden. Please treat this repo as a demo of method and engineering
-skill, and nothing beyond that.
+This is a methods study, not a biology or medical result. The classes are
+imbalanced, so the loss uses class weights, and the dashboard shows
+per-class numbers openly. Treat this repo as a demo of method and
+engineering only.
