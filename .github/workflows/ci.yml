@@ -39,3 +39,15 @@ jobs:
           context: .
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/tcga-pancancer-set-transformer:latest
+      - name: Smoke test the published image
+        run: |
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/tcga-pancancer-set-transformer:latest
+          docker run -d --name dash -p 7860:7860 "$IMAGE"
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:7860/ > /dev/null; then
+              echo "dashboard is up after $((i*5))s"; exit 0
+            fi
+            sleep 5
+          done
+          docker logs dash
+          exit 1

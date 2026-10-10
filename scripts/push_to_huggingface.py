@@ -13,6 +13,8 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
+
 from huggingface_hub import HfApi, create_repo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,8 +35,9 @@ datasets:
 
 A self-supervised, permutation-equivariant, uncertainty-aware classifier
 for large-scale, high-dimensional tabular data, evaluated on the UCSC
-Toil TCGA Pan-Cancer RNA-seq recompute (~{n_samples} samples, ~{n_features}
-features, {n_classes} categorical classes).
+Toil TCGA Pan-Cancer RNA-seq recompute ({n_samples} primary-tumor samples,
+{n_features} features, {n_classes} categorical classes; 70/15/15 train,
+validation, test split, so {n_test} held-out test samples).
 
 **This is a methods/representation-learning study. No biological,
 diagnostic, or clinical claims are made or implied.** Class labels are
@@ -56,8 +59,12 @@ used strictly as categorical ids for a tabular multi-class benchmark.
 - `model.pt` -- backbone + Bayesian head state dicts (see source repo for
   the exact module definitions needed to load them).
 - `config.yaml` -- architecture / training hyperparameters.
+- `model.onnx` -- the same model exported to ONNX (mean posterior
+  weights, deterministic pass), used by the in-browser demo.
 - `demo_samples.npz`, `classes.json` -- small bundle used by the live
   dashboard (not the full training dataset).
+- `results/` -- the raw metrics (per-epoch history, per-class numbers,
+  confusion matrix, calibration bins) behind every row of the table below.
 
 ## Results, reported honestly
 
@@ -118,8 +125,12 @@ def main():
             return f"{v:.3f}" if v is not None else "n/a"
         return f"{v*100:.1f}%" if v is not None else "n/a"
 
+    labels_path = ROOT / "data" / "processed" / "labels.npy"
+    n_total = int(np.load(labels_path, mmap_mode="r").shape[0]) if labels_path.exists() else "?"
+
     card = MODEL_CARD_TEMPLATE.format(
-        n_samples=bundle.get("n_test_samples", "?"),
+        n_samples=n_total,
+        n_test=bundle.get("n_test_samples", "?"),
         n_features=bundle.get("n_features", "?"),
         n_classes=len(bundle.get("classes", [])),
         logreg_acc=pct("baselines", "logreg", "accuracy"),
@@ -146,8 +157,12 @@ def main():
         args.config: "config.yaml",
         "dashboard_app/data/demo_samples.npz": "demo_samples.npz",
         "dashboard_app/data/classes.json": "classes.json",
+        "docs/model.onnx": "model.onnx",
         str(card_path): "README.md",
     }
+    for res in sorted((ROOT / "results").glob("*.json")):
+        files[f"results/{res.name}"] = f"results/{res.name}"
+
     for local, remote in files.items():
         local_path = ROOT / local if not Path(local).is_absolute() else Path(local)
         print(f"Uploading {local_path} -> {remote}")

@@ -229,7 +229,3 @@ samples and some have many. This is handled with class weights in the
 loss, and it is shown openly in the per class numbers in the dashboard,
 not hidden. Please treat this repo as a demo of method and engineering
 skill, and nothing beyond that.
-
-## Notes on process
-
-*(author's own notes go here)*
