@@ -36,3 +36,16 @@ def test_integrated_gradients_shape_and_completeness():
 
     # completeness axiom: sum of attributions ~= f(x) - f(baseline)
     assert abs(attributions.sum().item() - (f_x - f_baseline)) < 0.5
+
+
+def test_integrated_gradients_chunking_matches_single_batch():
+    torch.manual_seed(1)
+    backbone = TabularSetBackbone(n_features=12, dim=8, n_heads=2, n_inducing=4, n_isab_layers=1)
+    head = BayesianLinear(in_dim=8, out_dim=3)
+    backbone.eval()
+    head.eval()
+
+    x = torch.randn(1, 12)
+    full = integrated_gradients(backbone, head, x, 2, n_steps=20, chunk_size=20)
+    chunked = integrated_gradients(backbone, head, x, 2, n_steps=20, chunk_size=3)
+    assert torch.allclose(full, chunked, atol=1e-5)

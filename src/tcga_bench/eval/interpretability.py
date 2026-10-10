@@ -39,9 +39,16 @@ def integrated_gradients(
     target_class: int,
     baseline: torch.Tensor = None,
     n_steps: int = 50,
+    chunk_size: int = 2,
 ) -> torch.Tensor:
     """Integrated Gradients attribution of `head(backbone(x))[target_class]`
     with respect to the input features of a single sample x: (1, n_features).
+
+    The interpolation steps are pushed through the model `chunk_size` at a
+    time and their gradients accumulated, so peak memory stays flat in
+    `n_steps` (a full forward/backward over ~48k feature tokens costs
+    roughly 0.7 GB per step on CPU). The result is identical to running
+    all steps as one batch.
 
     Returns (n_features,) attributions. Satisfies (approximately, as
     n_steps -> inf) the completeness axiom:
@@ -51,14 +58,13 @@ def integrated_gradients(
         baseline = torch.zeros_like(x)
 
     alphas = torch.linspace(0, 1, n_steps, device=x.device).view(-1, 1)
-    interpolated = baseline + alphas * (x - baseline)  # (n_steps, n_features)
-    interpolated.requires_grad_(True)
+    grad_sum = torch.zeros_like(x.squeeze(0))
+    for chunk in alphas.split(chunk_size):
+        interpolated = (baseline + chunk * (x - baseline)).requires_grad_(True)  # (chunk, n_features)
+        logits = head(backbone(interpolated), sample=False)
+        grads = torch.autograd.grad(logits[:, target_class].sum(), interpolated)[0]
+        grad_sum += grads.sum(dim=0)
 
-    rep = backbone(interpolated)
-    logits = head(rep, sample=False)
-    target_logits = logits[:, target_class]
-
-    grads = torch.autograd.grad(target_logits.sum(), interpolated)[0]  # (n_steps, n_features)
-    avg_grads = grads.mean(dim=0)  # trapezoidal-ish Riemann approximation
+    avg_grads = grad_sum / n_steps  # trapezoidal-ish Riemann approximation
     attributions = (x.squeeze(0) - baseline.squeeze(0)) * avg_grads
     return attributions.detach()

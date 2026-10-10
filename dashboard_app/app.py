@@ -140,9 +140,10 @@ def explain_prediction(sample_idx: int, *slider_values):
         pred_class = int(torch.argmax(HEAD(BACKBONE(x), sample=False), dim=1).item())
 
     # fewer steps than the module default (50): a live "explain" button on
-    # CPU trades some Integrated-Gradients precision for a few seconds'
-    # wait instead of ~15s; see benchmark note in interpretability.py
-    attributions = integrated_gradients(BACKBONE, HEAD, x, target_class=pred_class, n_steps=20).numpy()
+    # CPU trades some Integrated-Gradients precision for a shorter wait.
+    # Steps are processed in small chunks inside integrated_gradients so
+    # memory stays flat (~2.5 GB) instead of growing with the step count.
+    attributions = integrated_gradients(BACKBONE, HEAD, x, target_class=pred_class, n_steps=10).numpy()
 
     order = np.argsort(-np.abs(attributions))[:12]
     colors = ["#0d9488" if v >= 0 else "#ef4444" for v in [attributions[i] for i in order][::-1]]
@@ -338,7 +339,7 @@ every design choice is checked against the data rather than asserted.
 
 THEME = gr.themes.Soft(primary_hue="teal", secondary_hue="indigo", neutral_hue="slate")
 
-with gr.Blocks(title="TCGA Pan-Cancer Representation Learning Benchmark", theme=THEME, css=CUSTOM_CSS) as demo:
+with gr.Blocks(title="TCGA Pan-Cancer Representation Learning Benchmark") as demo:
     gr.HTML(build_hero_html())
 
     with gr.Tab("Live Prediction"):
@@ -356,7 +357,7 @@ with gr.Blocks(title="TCGA Pan-Cancer Representation Learning Benchmark", theme=
         plot_out = gr.Plot()
         summary_out = gr.Markdown()
 
-        gr.Markdown("**Explain this prediction** (Integrated Gradients, ~5-10s on CPU): "
+        gr.Markdown("**Explain this prediction** (Integrated Gradients, 10 steps, can take 15-30s on CPU): "
                     "which features pushed the model toward / away from its predicted class.")
         explain_btn = gr.Button("Explain prediction")
         explain_plot = gr.Plot()
@@ -379,4 +380,4 @@ with gr.Blocks(title="TCGA Pan-Cancer Representation Learning Benchmark", theme=
 
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))
+    demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)), theme=THEME, css=CUSTOM_CSS)
